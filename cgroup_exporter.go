@@ -58,9 +58,16 @@ type CgroupMetric struct {
 	name            string
 	cpuUser         float64
 	cpuSystem       float64
+	CfsPeriodUs     float64
+	CfsQuotaUs      float64
 	cpuTotal        float64
 	cpus            int
 	cpu_list        string
+	InactiveFile    float64
+	ActiveFile      float64
+	OomKillDisable  float64
+	UnderOom        float64
+	OomKill         float64
 	memoryRSS       float64
 	memoryCache     float64
 	memoryUsed      float64
@@ -84,8 +91,15 @@ type Exporter struct {
 	cpuUser         *prometheus.Desc
 	cpuSystem       *prometheus.Desc
 	cpuTotal        *prometheus.Desc
+	CfsPeriodUs     *prometheus.Desc
+	CfsQuotaUs      *prometheus.Desc
 	cpus            *prometheus.Desc
 	cpu_info        *prometheus.Desc
+	InactiveFile    *prometheus.Desc
+	ActiveFile      *prometheus.Desc
+	OomKillDisable  *prometheus.Desc
+	UnderOom        *prometheus.Desc
+	OomKill         *prometheus.Desc
 	memoryRSS       *prometheus.Desc
 	memoryCache     *prometheus.Desc
 	memoryUsed      *prometheus.Desc
@@ -120,6 +134,7 @@ func sliceContains(s interface{}, v interface{}) bool {
 func subsystem() ([]cgroups.Subsystem, error) {
 	s := []cgroups.Subsystem{
 		cgroups.NewCpuacct(*cgroupRoot),
+		cgroups.NewCpu(*cgroupRoot),
 		cgroups.NewMemory(*cgroupRoot),
 	}
 	return s, nil
@@ -286,10 +301,24 @@ func NewExporter(paths []string, logger log.Logger) *Exporter {
 			"Cumalitive CPU system seconds for cgroup", []string{"cgroup"}, nil),
 		cpuTotal: prometheus.NewDesc(prometheus.BuildFQName(namespace, "cpu", "total_seconds"),
 			"Cumalitive CPU total seconds for cgroup", []string{"cgroup"}, nil),
+		CfsPeriodUs: prometheus.NewDesc(prometheus.BuildFQName(namespace, "cpu", "cfs_period_us"),
+			"Cumalitive cfs_period_us for cgroup", []string{"cgroup"}, nil),
+		CfsQuotaUs: prometheus.NewDesc(prometheus.BuildFQName(namespace, "cpu", "cfs_quota_us"),
+			"Cumalitive cfs_quota_us for cgroup", []string{"cgroup"}, nil),
 		cpus: prometheus.NewDesc(prometheus.BuildFQName(namespace, "", "cpus"),
 			"Number of CPUs in the cgroup", []string{"cgroup"}, nil),
 		cpu_info: prometheus.NewDesc(prometheus.BuildFQName(namespace, "", "cpu_info"),
 			"Information about the cgroup CPUs", []string{"cgroup", "cpus"}, nil),
+		InactiveFile: prometheus.NewDesc(prometheus.BuildFQName(namespace, "memory", "inactive_file"),
+			"Memory inactive_file", []string{"cgroup"}, nil),
+		ActiveFile: prometheus.NewDesc(prometheus.BuildFQName(namespace, "memory", "active_file"),
+			"Memory active_file", []string{"cgroup"}, nil),
+		OomKillDisable: prometheus.NewDesc(prometheus.BuildFQName(namespace, "memory", "oom_kill_disable"),
+			"Memory oom_kill_disable", []string{"cgroup"}, nil),
+		UnderOom: prometheus.NewDesc(prometheus.BuildFQName(namespace, "memory", "under_oom"),
+			"Memory under_oom", []string{"cgroup"}, nil),
+		OomKill: prometheus.NewDesc(prometheus.BuildFQName(namespace, "memory", "oom_kill"),
+			"Memory oom_kill", []string{"cgroup"}, nil),
 		memoryRSS: prometheus.NewDesc(prometheus.BuildFQName(namespace, "memory", "rss_bytes"),
 			"Memory RSS used in bytes", []string{"cgroup"}, nil),
 		memoryCache: prometheus.NewDesc(prometheus.BuildFQName(namespace, "memory", "cache_bytes"),
@@ -331,6 +360,13 @@ func (e *Exporter) getMetrics(name string, pids map[string][]int) (CgroupMetric,
 	metric.cpuUser = float64(stats.CPU.Usage.User) / 1000000000.0
 	metric.cpuSystem = float64(stats.CPU.Usage.Kernel) / 1000000000.0
 	metric.cpuTotal = float64(stats.CPU.Usage.Total) / 1000000000.0
+	metric.CfsPeriodUs = float64(stats.CPU.Usage.CfsPeriodUs)
+	metric.CfsQuotaUs = float64(stats.CPU.Usage.CfsQuotaUs)
+	metric.OomKillDisable = float64(stats.MemoryOomControl.OomKillDisable)
+	metric.UnderOom = float64(stats.MemoryOomControl.UnderOom)
+	metric.OomKill = float64(stats.MemoryOomControl.OomKill)
+	metric.InactiveFile = float64(stats.Memory.InactiveFile)
+	metric.ActiveFile = float64(stats.Memory.ActiveFile)
 	metric.memoryRSS = float64(stats.Memory.TotalRSS)
 	metric.memoryCache = float64(stats.Memory.TotalCache)
 	metric.memoryUsed = float64(stats.Memory.Usage.Usage)
@@ -415,8 +451,15 @@ func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
 	ch <- e.cpuUser
 	ch <- e.cpuSystem
 	ch <- e.cpuTotal
+	ch <- e.CfsPeriodUs
+	ch <- e.CfsQuotaUs
 	ch <- e.cpus
 	ch <- e.cpu_info
+	ch <- e.InactiveFile
+	ch <- e.ActiveFile
+	ch <- e.OomKillDisable
+	ch <- e.UnderOom
+	ch <- e.OomKill
 	ch <- e.memoryRSS
 	ch <- e.memoryCache
 	ch <- e.memoryUsed
@@ -440,8 +483,15 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 		ch <- prometheus.MustNewConstMetric(e.cpuUser, prometheus.GaugeValue, m.cpuUser, m.name)
 		ch <- prometheus.MustNewConstMetric(e.cpuSystem, prometheus.GaugeValue, m.cpuSystem, m.name)
 		ch <- prometheus.MustNewConstMetric(e.cpuTotal, prometheus.GaugeValue, m.cpuTotal, m.name)
+		ch <- prometheus.MustNewConstMetric(e.CfsPeriodUs, prometheus.GaugeValue, m.CfsPeriodUs, m.name)
+		ch <- prometheus.MustNewConstMetric(e.CfsQuotaUs, prometheus.GaugeValue, m.CfsQuotaUs, m.name)
 		ch <- prometheus.MustNewConstMetric(e.cpus, prometheus.GaugeValue, float64(m.cpus), m.name)
 		ch <- prometheus.MustNewConstMetric(e.cpu_info, prometheus.GaugeValue, 1, m.name, m.cpu_list)
+		ch <- prometheus.MustNewConstMetric(e.InactiveFile, prometheus.GaugeValue, m.InactiveFile, m.name)
+		ch <- prometheus.MustNewConstMetric(e.ActiveFile, prometheus.GaugeValue, m.ActiveFile, m.name)
+		ch <- prometheus.MustNewConstMetric(e.OomKillDisable, prometheus.GaugeValue, m.OomKillDisable, m.name)
+		ch <- prometheus.MustNewConstMetric(e.UnderOom, prometheus.GaugeValue, m.UnderOom, m.name)
+		ch <- prometheus.MustNewConstMetric(e.OomKill, prometheus.GaugeValue, m.OomKill, m.name)
 		ch <- prometheus.MustNewConstMetric(e.memoryRSS, prometheus.GaugeValue, m.memoryRSS, m.name)
 		ch <- prometheus.MustNewConstMetric(e.memoryCache, prometheus.GaugeValue, m.memoryCache, m.name)
 		ch <- prometheus.MustNewConstMetric(e.memoryUsed, prometheus.GaugeValue, m.memoryUsed, m.name)
